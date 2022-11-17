@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<head>
+<title>Biber</title>
+<style>
+body{
+	margin:0;
+	padding:0;
+}
+#screen{
+	display:block;
+}
+</style>
+</head>
+<body>
+<canvas id="screen"></canvas>
+<script>
+
+var context;
+var initi = false;
+
+var gameW;
+var gameH;
+
+var mouseX;
+var mouseY;
+var moveX;
+var moveY;
+
+var hitboxSlider;
+
+var gravity = -0.5;
+var glide = 1;
+
+class AudioData {
+  constructor(file, loop=false) {
+	this.audio = new Audio();
+    this.audio.src = file;
+	this.audio.loop = false;
+  }
+  play() {
+	this.audio.play();
+  }
+  mute() {
+	this.audio.muted = true;
+  }
+	loop() {
+		this.audio.loop = true;
+	}
+  unmute() {
+	this.audio.muted = false;
+  }
+  toggle() {
+	this.audio.muted = !this.audio.muted;
+  }
+  setVolume(volume) {
+  this.audio.volume = volume;
+  }
+}
+class Camera {
+	constructor(x=0,y=0) {
+		this.x = x;
+		this.y = y;
+	}
+}
+class Slider {
+	constructor(x,y,width,height,standard) {
+		this.image = new Image();
+		this.image.onload = function () {};
+		this.image.src = "img/slider.png";
+		this.imgWidth = this.image.width;
+		this.imgHeight = this.image.height;
+		this.x = x;
+		this.y = y;
+		this.opacity = 0;
+		this.width = width;
+		this.height = height;
+		this.value = standard;
+	}
+	checkSlide() {
+		if(this.x+this.width<moveX||this.x-this.imgWidth>moveX||this.y+this.height<moveY||this.y>moveY) {
+			if(this.x+this.width<mouseX||this.x-this.imgWidth>mouseX||this.y+this.height<mouseY||this.y>mouseY) {
+				return false;
+			}
+			this.value = (mouseY-this.y)/this.height;
+			return true;
+		}
+		this.value = (moveY-this.y)/this.height;
+		return true;
+	}
+	draw() {
+		if(this.opacity>0.05) {
+			context.globalAlpha = this.opacity;
+			context.drawImage(this.image,(this.x-this.imgWidth)*gameH/1000,(1000-this.imgHeight/2-this.y-this.value*this.height)*gameH/1000,this.imgWidth*gameH/1000,this.imgHeight*gameH/1000);
+			context.fillStyle="rgba("+0+","+0+","+0+","+this.opacity+")";
+			context.fillRect((this.x)*gameH/1000,(1000-this.height-this.y)*gameH/1000,this.width*gameH/1000,this.height*gameH/1000);
+			context.globalAlpha = 1;
+		}
+	}
+}
+class ObjectData {
+  constructor(file,x,y,scale,camera=null,images=0,speed=1,loop=true,animation=true) {
+	this.active = 0;
+	this.image = [];
+	this.animation = animation;
+	this.context = context;
+	this.hitboxScaleX = 1.0;
+	this.hitboxScaleY = 1.0;
+	this.collided = false;
+	var ratio = 0;
+	for(var i=0;i<=images;i++) {
+		this.image.push(new Image());
+		this.image[i].onload = function () {};
+		this.image[i].src = "img/"+file+(images==0?"":i)+".png";
+	}
+	this.x = x;
+	this.y = y;
+	this.velocityX = 0;
+	this.velocityY = 0;
+	this.camera = camera==null ? new Camera() : camera;
+	this.ratio = this.image[0].height/this.image[0].width;
+	this.width = scale;
+	this.height = scale*this.ratio;
+
+	this.left = 0;
+	this.right = this.width;
+	this.top = 0;
+	this.bottom = this.height;
+
+	this.speed = speed;
+	this.loop = loop;
+  }
+  setHitbox(hitboxScaleX,hitboxScaleY) {
+  	this.hitboxScaleX = hitboxScaleX;
+  	this.hitboxScaleY = hitboxScaleY;
+		this.left = this.width*(1-this.hitboxScaleX)*0.5;
+		this.right = this.left+this.width*this.hitboxScaleX;
+		this.top = -this.height*(1-this.hitboxScaleY)*0.5;
+		this.bottom = this.top+this.height*this.hitboxScaleY;
+  }
+  testCollision(object) {
+		if(this.x+this.right<object.x+object.left||this.x+this.left>object.x+object.right||this.y+this.bottom<object.y+object.top||this.y+this.top>object.y+object.bottom) {
+			return false;
+		}
+		return true;
+  }
+  checkMouse() {
+  		if(this.x+this.right<mouseX||this.x+this.left>mouseX||this.y+this.bottom<mouseY||this.y+this.top>mouseY) {
+		return false;
+	}
+	return true;
+  }
+  next() {
+	if(this.animation) {
+		if(this.loop) {
+			this.active = (this.active+1/this.speed)%(this.image.length);
+		}
+		else {
+			this.active = Math.min(this.active+1/this.speed,this.image.length-1);
+		}
+	}
+  }
+  draw(image=Math.floor(this.active)) {
+	context.drawImage(this.image[image],(this.x-this.camera.x)*gameH/1000,(1000-this.height-this.y+this.camera.y)*gameH/1000,this.width*gameH/1000,this.height*gameH/1000);
+  }
+  drawHitbox(r=255,b=255,g=255,a=0.3) {
+	context.fillStyle="rgba("+r+","+b+","+g+","+a+")";
+	context.fillRect((this.x+this.left-this.camera.x)*gameH/1000,(1000-this.height-this.y-this.top-this.camera.y)*gameH/1000,this.width*this.hitboxScaleX*gameH/1000,this.height*this.hitboxScaleY*gameH/1000);
+  }
+}
+
+var highscore
+var money = 10;
+var canvas;
+var bieberLive;
+var con = 1;
+
+//Sounds
+var sound;
+var abspringen;
+var bing;
+var game;
+var bading;
+var hoa;
+var haa;
+var kaching;
+var dff;
+
+var sprung = 0;
+var hspeed = 0;
+var imgin;
+
+//Objects
+var back1, back2;
+var bild1, bild2;
+var ground1, ground2;
+var upgradeDoppel, upgradeSprung, upgradeFall;
+var coin1, coin2
+var hindernis1, hindernis2, hindernis3;
+var hitbox, soundop, musicop, menu;
+var bieber;
+var pelikan;
+var akku = 0;
+var punkt;
+var phase;
+var menuu = false;
+var homee = true;
+var lives = 3;
+var string = "";
+var cx = 0;
+var cy = 0;
+var lautmu=2;
+var lautto=1;
+var starhi=1;
+var cameraGame = new Camera();
+var groundLevel;
+var coinLevel;
+var dynamics;
+var doppelJump = 1;
+var shurikenReady = 1;
+var swordReady = 1;
+var clicked = false;
+var speed = 1;
+
+gameStart();
+
+function gameStart()
+{
+	gameInit();
+	musicon = true;
+	soundon = true;
+	if(localStorage.score>0==false) {
+		localStorage.setItem("score",0);
+	}
+	setInterval(gameLoop, 10);
+	setInterval(gameDrawLoop, 20);
+}
+function newRun() {
+	menu.next();
+	bieber.x = 0;
+	bieber.y = groundLevel;
+	cameraGame.x = 0;
+	hindernis1.x = 2000;
+	hindernis2.x = 3000;
+	hindernis3.x = 4000;
+	pelikan.x = 10000;
+	coin1.x = 2000;
+	coin2.x = 2000;
+	dart.x = -100;
+}
+function gameInit()
+{
+	console.log("Initialisierung erfolgreich");
+	canvas = document.getElementById("screen");
+	context = canvas.getContext("2d");
+	phase=0;
+	punkt = 0;
+	if(window.innerWidth>window.innerHeight*1.75) {
+		gameH = window.innerHeight;
+		gameW = gameH*1.75;
+		cx = (window.innerWidth/2-gameW/2);
+		cy = 0;
+		string = (window.innerWidth/2-gameW/2).toString()+"px";
+    	canvas.style.left = string;
+		canvas.style.top = "0px";
+    	canvas.style.position = "absolute";
+	}
+	else {
+		gameW = window.innerWidth;
+		gameH = gameW*0.57;
+		cy = (window.innerHeight/2-gameH/2);
+		cx = 0;
+		string = (window.innerHeight/2-gameH/2).toString()+"px";
+    	canvas.style.top = string;
+		canvas.style.left = "0px";
+    	canvas.style.position = "absolute";
+	}
+
+	canvas.width = gameW;
+	canvas.height = gameH;
+	groundL = gameH*0.63;
+	cameraX = 0;
+	cameraGame = new Camera();
+
+	abspringen = new AudioData("sound/abspringen.wav",false);
+	bing = new AudioData("sound/bing.wav");
+	bading = new AudioData("sound/bading.wav");
+	hoa = new AudioData("sound/hoa.wav");
+	haa = new AudioData("sound/haa.wav");
+	kaching = new AudioData("sound/kaching.wav");
+	dff = new AudioData("sound/dff.wav");
+	sound = new AudioData("sound/sound.wav",true);
+	sound.play();
+	sound.loop(),
+	sound.toggle();
+
+	//Structure constructor(file,x,y,scale,camera=null,images=0,speed=1,loop=true,animation=true)
+
+	hitbox = new ObjectData("hitbox",300,20,64,null,8,10,true,false);
+	hitboxSlider = new Slider(332,84,5,128,0.2);
+	soundop=new ObjectData("ton",390,20,64,null,3,20,true,true);
+	soundSlider = new Slider(422,84,5,128,0.2);
+	musicop = new ObjectData("music",480,20,64,null,6,10,true,false);
+	musicSlider = new Slider(512,84,5,128,0.2);
+	menu = new ObjectData("menu",570,20,64,null,1,1,true,true);
+
+	ground1 = new ObjectData("ground",0,0,2000);
+	ground2 = new ObjectData("ground",2000,0,2000);
+	groundLevel = ground1.height;
+
+	bild1 = new ObjectData("landschaft",0,groundLevel,6000,null,0,1,true,true);
+	bild2 = new ObjectData("landschaft",6000,groundLevel,6000,null,0,1,true,true);
+	back1 = new ObjectData("back",0,groundLevel+350,2100);
+	back2 = new ObjectData("back",2100,groundLevel+350,2100);
+
+	bieber = new ObjectData("bieber",0,groundLevel,170,cameraGame,5,5);
+	bieber.setHitbox(0.5,1);
+	bieber.velocityX = 6;
+	coinLevel = groundLevel+bieber.height+100;
+	
+	sword = new ObjectData("sword",0,groundLevel,150,cameraGame,8,4,true,false);
+	sword.setHitbox(0.1,1);
+
+	updraft = new ObjectData("updraft",0,groundLevel,64,cameraGame,19,1,false,true);
+
+	pelikan = new ObjectData("pelikan",10000,groundLevel+150,200,cameraGame,2,5,true,true);
+	pelikan.setHitbox(0.4,0.8);
+
+	updraftPelikan = new ObjectData("updraft",10000,groundLevel+150,100,cameraGame,19,2,true,true);
+	
+	shootikan = new ObjectData("pelikan",-1000,groundLevel+45,150,cameraGame,2,5,true,true);
+	dart = new ObjectData("dart",-1000,groundLevel+55,64,cameraGame,1,1,false,false);
+	
+	shuriken = new ObjectData("shuriken",100,groundLevel+150,32,cameraGame,2,10,true,true);
+
+	upgradeDoppel = new ObjectData("doppel",500,900,96,null,4,1,false,true);
+	upgradeSprung = new ObjectData("sprung",620,900,96,null,4,1,false,true);
+	upgradeFall = new ObjectData("fall",740,900,96,null,4,1,false,true);	
+	upgradeShuriken = new ObjectData("upShuriken",860,900,96,null,4,1,false,true);	
+	upgradeSword = new ObjectData("upShuriken",980,900,96,null,4,1,false,true);	
+	
+
+	coin1 = new ObjectData("geld",2000,coinLevel,50,cameraGame,14,2,false,false);
+	coin2 = new ObjectData("geld",3000,coinLevel,50,cameraGame,14,2,false,false);
+
+	hindernis1 = new ObjectData("hindernis",2000,groundLevel,100,cameraGame);
+	hindernis1.setHitbox(0.6,1);
+	hindernis2 = new ObjectData("hindernis",3000,groundLevel,100,cameraGame);
+	hindernis2.setHitbox(0.6,1);
+	hindernis3 = new ObjectData("hindernis",4000,groundLevel,100,cameraGame);
+	hindernis3.setHitbox(0.6,1);
+
+	rose1 = new ObjectData("rose",1250,900,64);
+	rose2 = new ObjectData("rose",1320,900,64);
+	rose3 = new ObjectData("rose",1390,900,64);
+
+	document.body.onmousedown = function() {click();};
+	document.body.onmouseup = function() {clicked = false;};
+	document.body.onmousemove = function() {if(clicked){move();}};
+
+}
+function click() {
+	if(!initi) {
+		setTimeout(gameInit,500);
+		initi = true;
+	}
+
+	clicked = true;
+
+	mouseX=(window.event.clientX-cx)/gameW*1750;
+	mouseY=1000-(window.event.clientY-cy)/gameH*1000;
+}
+function move() {
+	moveX=(window.event.clientX-cx)/gameW*1750;
+	moveY=1000-(window.event.clientY-cy)/gameH*1000;
+}
+
+function gameLoop()
+{
+	if(lives==0) {
+		hindernis1.collided = false;
+		hindernis2.collided = false;
+		hindernis3.collided = false;
+		pelikan.collided = false;
+		lives = 3;
+		newRun();
+	}
+	if(bieber.testCollision(coin1)) {
+		if(coin1.active==0) {
+			money++;
+			bing.play();
+			coin1.animation = true;
+			coin1.next();
+		}
+	}
+	if(bieber.testCollision(coin2)) {
+		if(coin2.active==0) {
+			money++;
+			bading.play();
+			coin2.animation = true;
+			coin2.next();
+		}
+	}
+	if(bieber.testCollision(hindernis1)) {
+		lives -= hindernis1.collided ? 0 : 1;
+		hindernis1.collided = true;
+	}
+	else if(bieber.testCollision(hindernis2)) {
+		lives -= hindernis2.collided ? 0 : 1;
+		hindernis2.collided = true;
+	}
+	else if(bieber.testCollision(hindernis3)) {
+		lives -= hindernis3.collided ? 0 : 1;
+		hindernis3.collided = true;
+	}
+	else if(bieber.testCollision(pelikan)) {
+		lives -= pelikan.collided ? 0 : 1;
+		pelikan.collided = true;
+	}
+	else if(bieber.testCollision(dart)) {
+		lives -= dart.collided ? 0 : 1;
+		dart.collided = true;
+	}
+	else {
+		hindernis1.collided = false;
+		hindernis2.collided = false;
+		hindernis3.collided = false;
+		pelikan.collided = false;
+		dart.collided = false;
+	}
+	if(pelikan.testCollision(shuriken)) {
+		pelikan.velocityX = 30;
+		pelikan.velocityY = 18;
+	}
+	if(coin1.testCollision(shuriken)) {
+		coin1.animation = true;
+	}
+	if(coin2.testCollision(shuriken)) {
+		coin2.animation = true;
+	}
+	if(sword.animation==true&&sword.testCollision(dart)) {
+		dart.active = 1;
+		dart.velocityX = 10;
+	}
+	if((dart.velocityX==10&&shootikan.testCollision(dart))||shootikan.testCollision(shuriken)) {
+		shootikan.x = -1000;
+		dart.velocityX = 0;
+		dart.x = 0;
+	}
+
+	if(soundop.checkMouse()) {
+		soundop.animation = !soundop.animation;
+		soundop.active = 0;
+		abspringen.toggle();
+		bing.toggle();
+		bading.toggle();
+		hoa.toggle();
+		haa.toggle();
+		kaching.toggle();
+		dff.toggle();
+	}
+	else if(musicop.checkMouse()) {
+		musicop.animation = !musicop.animation;
+		musicop.active = 0;
+		sound.toggle();
+	}
+	else if(hitbox.checkMouse()) {
+		hitbox.animation = !hitbox.animation;
+		hitbox.active = 0;
+	}
+	else if(menu.checkMouse()) {
+		menu.next();
+	}
+	else if(upgradeDoppel.checkMouse()) {
+		upgradeDoppel.next();
+	}
+	else if(upgradeSprung.checkMouse()) {
+		upgradeSprung.next();
+	}
+	else if(upgradeFall.checkMouse()) {
+		upgradeFall.next();
+	}
+	else if(upgradeShuriken.checkMouse()) {
+		upgradeShuriken.next();
+	}
+	else if(upgradeSword.checkMouse()) {
+		upgradeSword.next();
+	}
+	else if((moveX!=0||moveY!=0||mouseX!=0||mouseY!=0)) {
+		if(hitboxSlider.checkSlide()) {
+			hitboxSlider.opacity = 1;
+		}
+		else if(soundSlider.checkSlide()) {
+			soundSlider.opacity = 1;
+		}
+		else if(musicSlider.checkSlide()) {
+			musicSlider.opacity = 1;
+		}
+		else if(shurikenReady==0&&mouseX > 875&&mouseY > 500) {
+			shurikenReady += 1000;
+			shuriken.x = bieber.x+bieber.width/2;
+			shuriken.y = bieber.y+1;
+			shuriken.velocityY = 15;
+		}
+		else if(swordReady==0&&mouseX > 875&&mouseY <= 500) {
+			swordReady += 500;
+			sword.animation = true;
+		}
+		else if(mouseX!=0||mouseY!=0) {
+			if((bieber.y<=groundLevel||doppelJump==0)&&menu.active==0) {
+				bieber.velocityY = 12+upgradeSprung.active*0.7;
+				if(bieber.y>groundLevel) {
+					doppelJump += 1000;
+				}
+				updraft.active = 0;
+				abspringen.play();
+			}
+		}
+	}
+
+	updraft.x = bieber.x+updraft.width*0.7;
+	updraft.y = bieber.y-updraft.height*0.7;
+	
+	sword.x = bieber.x+bieber.width*0.48;
+	sword.y = bieber.y + (bieber.active > 4 ? bieber.height*0.3 :  Math.round(bieber.active) == 1 ? bieber.height*0.10 : bieber.height*0.18);
+		
+
+	if(menu.active==0) {
+		speed *= 1.000001;
+
+		doppelJump = Math.max(doppelJump-upgradeDoppel.active,0);
+		shurikenReady = Math.max(shurikenReady-upgradeShuriken.active,0);
+		swordReady = Math.max(swordReady-upgradeSword.active,0);
+		
+		bieber.velocityY += gravity*glide;
+		bieber.x += 6*speed;
+		bieber.y += bieber.velocityY;
+		
+		shuriken.x += 15*speed;
+		shuriken.velocityY += gravity;
+		if(shuriken.y <= groundLevel) {
+			//shuriken.velocityY = 0.8*Math.abs(shuriken.velocityY);
+		}
+
+		shuriken.y += shuriken.velocityY;
+		
+		glide = 1;
+		if(bieber.y <= groundLevel) {
+			if(bieber.velocityY != gravity) {
+				dff.play();
+			}
+			bieber.y = groundLevel;
+			bieber.velocityY = 0;
+		}
+		else if(bieber.velocityY<0&&clicked) {
+			glide = 1/(upgradeFall.active+1)
+		}
+
+		pelikan.velocityX *= 0.9;
+		pelikan.velocityY *= 0.9;
+		pelikan.x -= 2 - pelikan.velocityX;
+		pelikan.y += pelikan.velocityY;
+		updraftPelikan.next();
+		updraftPelikan.x = pelikan.x+updraft.width*0.7;
+		updraftPelikan.y = pelikan.y-updraft.width*0.8;
+		
+		dart.x += dart.velocityX*speed;
+		if(dart.x-cameraGame.x<-300&&bieber.x<shootikan.x&&shootikan.x-bieber.x<1000) {
+			dart.active = 0;
+			dart.velocityX = -4;
+			dart.x = shootikan.x;
+		}
+
+		if(bieber.x > 1750/4)
+		{
+			cameraGame.x += 6*speed;
+			bild1.x -= 1.5*speed;
+			bild2.x -= 1.5*speed;
+			back1.x -= 1*speed;
+			back2.x -= 1*speed;
+			ground1.x -= 6*speed;
+			ground2.x -= 6*speed;
+		}
+		if(bild2.x < -bild2.width) {
+			bild2.x += 2*bild2.width;
+			bild2.next();
+		}
+		if(bild1.x < -bild1.width) {
+			bild1.x += 2*bild2.width;
+			bild1.next();
+		}
+		if(back2.x < -back2.width) {
+			back2.x += 2*back2.width;
+		}
+		if(back1.x < -back1.width) {
+			back1.x += 2*back1.width;
+		}
+		if(ground2.x < -ground2.width) {
+			ground2.x += 2*ground2.width;
+		}
+		if(ground1.x < -ground1.width) {
+			ground1.x += 2*ground1.width;
+		}
+		if(hindernis1.x+hindernis1.width-cameraGame.x < 0) {
+			hindernis1.x = hindernis3.x+600*speed+Math.random()*500;
+			if(bieber.x>200&&Math.random()>0.1) {
+				shootikan.x = hindernis1.x-20;
+			}
+		}
+		if(hindernis2.x+hindernis2.width-cameraGame.x < 0) {
+			hindernis2.x = hindernis1.x+600*speed+Math.random()*500;
+		}
+		if(hindernis3.x+hindernis3.width-cameraGame.x < 0) {
+			hindernis3.x = hindernis2.x+600*speed+Math.random()*500;
+		}
+	}
+	if(coin1.x+coin1.width-cameraGame.x < 0) {
+		coin1.x = coin2.x+1000*speed+Math.random()*1000;
+		coin1.active = 0;
+		coin1.animation = false;
+	}
+	if(coin2.x+coin2.width-cameraGame.x < 0) {
+		coin2.x = coin1.x+1000*speed+Math.random()*1000;
+		coin2.active = 0;
+		coin2.animation = false;
+	}
+	if(pelikan.x+pelikan.width-cameraGame.x < 0) {
+		pelikan.x += 2000*speed+Math.random()*10000;
+		pelikan.y = groundLevel+150+Math.random()*100;
+	}
+
+	mouseX = 0;
+	mouseY = 0;
+	moveX = 0;
+	moveY = 0;
+}
+//		(gameH*0.3939,gameH*0.0964,gameH*0.0661,gameH*0.0495);context.fillRect(gameH*0.4821,gameH*0.0964,gameH*0.0661,gameH*0.0495);
+function gameDrawLoop()
+{
+	context.clearRect(0,0,gameW,gameH);
+
+	context.imageSmoothingEnabled = false;
+	context.fillStyle="rgb(128,216,255)";
+	context.fillRect(0,0,gameH*1.75,gameH);
+	back1.draw();
+	back2.draw();
+	bild1.draw();
+	bild2.draw();
+	ground1.draw();
+	ground2.draw();
+
+	hindernis1.draw();
+	hindernis2.draw();
+	hindernis3.draw();
+
+	coin1.next();
+	coin2.next();
+
+	coin1.draw();
+	coin2.draw();
+	
+	if(sword.active>=8) {
+		sword.active = 0;
+		sword.animation = false;
+	}
+	sword.next();
+	sword.draw();
+
+	bieber.next();
+	if(bieber.y<=groundLevel) {
+		if(bieber.active>=4) {
+			bieber.active = 0;
+		}
+	}
+	else {
+		bieber.active = 5;
+	}
+	updraft.next();
+	updraft.draw();
+	bieber.draw();
+
+	pelikan.next();
+	updraftPelikan.draw();
+	pelikan.draw();
+	
+	dart.draw();
+	shootikan.draw();
+	
+	shuriken.next();
+	shuriken.draw();
+
+	if(hitbox.animation) {
+		coin1.drawHitbox(255,158,128,hitboxSlider.value);
+		coin2.drawHitbox(255,158,128,hitboxSlider.value);
+		hindernis1.drawHitbox(203,255,144,hitboxSlider.value);
+		hindernis2.drawHitbox(203,255,144,hitboxSlider.value);
+		hindernis3.drawHitbox(203,255,144,hitboxSlider.value);
+		bieber.drawHitbox(167,25,234,hitboxSlider.value);
+		pelikan.drawHitbox(255,255,255,hitboxSlider.value);
+	}
+
+	if(lives>=3) {
+			rose1.draw();
+	}
+	if(lives>=2) {
+			rose2.draw();
+	}
+	if(lives>=1) {
+			rose3.draw();
+	}
+
+	menu.draw();
+
+	hitbox.next();
+	if(hitbox.active<1&&hitbox.animation) {
+		hitbox.active = 1;
+	}
+	if(hitbox.animation) {
+			hitboxSlider.opacity *= 0.99;
+			hitboxSlider.draw();
+	}
+	hitbox.draw();
+
+	soundop.next();
+	if(soundop.active==5) {
+		soundop.next();
+	}
+	if(soundop.animation) {
+		soundSlider.opacity *= 0.99;
+		soundSlider.draw();
+		abspringen.setVolume(soundSlider.value);
+		bing.setVolume(soundSlider.value);
+		bading.setVolume(soundSlider.value);
+		hoa.setVolume(soundSlider.value);
+		haa.setVolume(soundSlider.value);
+		kaching.setVolume(soundSlider.value);
+		dff.setVolume(soundSlider.value);
+	}
+	soundop.draw();
+
+	musicop.next();
+	if(musicop.active==7) {
+		musicop.next();
+	}
+	if(musicop.animation) {
+		musicSlider.opacity *= 0.99;
+		musicSlider.draw();
+		sound.setVolume(musicSlider.value);
+	}
+	musicop.draw();
+
+	upgradeDoppel.draw();
+	upgradeDoppel.drawHitbox(0,0,0,doppelJump==0?0:(doppelJump+500)/2000);
+	upgradeShuriken.draw();
+	upgradeShuriken.drawHitbox(0,0,0,shurikenReady==0?0:(shurikenReady+500)/2000);
+	upgradeSword.draw();
+	upgradeSword.drawHitbox(0,0,0,swordReady==0?0:(swordReady+200)/1000);
+	upgradeSprung.draw();
+	upgradeFall.draw();
+
+	string = (gameH*0.0523).toString()+"px Georgia";
+	context.font=string;
+	context.fillStyle="white";
+	context.fillText(money,gameH*1.575,gameH*0.0661);
+	context.fillText(Math.round(punkt*0.01),gameH*1.575,gameH*0.1377);
+	string = (gameH*0.0207).toString()+"px Georgia";
+	context.font=string;
+	context.fillStyle="black";
+	context.fillText("Game Code by Luca",gameH*0.0220,gameH*0.89);
+	context.fillText("Graphics by Lennart",gameH*0.0220,gameH*0.92);
+	context.fillText("Sounds by Martin",gameH*0.0220,gameH*0.95);
+	context.fillText("Motivational coach - Jan",gameH*0.0220,gameH*0.98);
+	context.fillText(localStorage.score,gameH*1.575,gameH*0.98);
+	context.stroke();
+}
+</script>
+</body>
+</html>
